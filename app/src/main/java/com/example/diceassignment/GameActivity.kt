@@ -28,38 +28,51 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diceassignment.ui.theme.DiceAssignmentTheme
 import kotlin.random.Random
+import com.example.diceassignment.ui.theme.DeepBlue
+import com.example.diceassignment.ui.theme.Green
+import com.example.diceassignment.ui.theme.Amber
+import com.example.diceassignment.ui.theme.GameButton
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import com.example.diceassignment.ui.theme.DiceSelected
+import com.example.diceassignment.ui.theme.DiceUnselected
+import com.example.diceassignment.ui.theme.ComputerDice
 
 class GameActivity : ComponentActivity() {
-    private var humanScore by mutableStateOf(0)
-    private var computerScore by mutableStateOf(0)
-    private var humanWins by mutableStateOf(0)
-    private var computerWins by mutableStateOf(0)
-    private var targetScore by mutableStateOf(101)
+    // my variables for the game
+    private var myGamePoints by mutableStateOf(0)
+    private var compScore by mutableStateOf(0)
+    private var playerWinCount by mutableStateOf(0)
+    private var compWinCount by mutableStateOf(0)
+    private var winningPoints by mutableStateOf(101) // default score as per spec
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // restore stuff if orientation changes etc
         if (savedInstanceState != null) {
-            humanScore = savedInstanceState.getInt("humanScore", 0)
-            computerScore = savedInstanceState.getInt("computerScore", 0)
-            humanWins = savedInstanceState.getInt("humanWins", 0)
-            computerWins = savedInstanceState.getInt("computerWins", 0)
-            targetScore = savedInstanceState.getInt("targetScore", 101)
+            myGamePoints = savedInstanceState.getInt("myGamePoints", 0)
+            compScore = savedInstanceState.getInt("compScore", 0)
+            playerWinCount = savedInstanceState.getInt("playerWinCount", 0)
+            compWinCount = savedInstanceState.getInt("compWinCount", 0)
+            winningPoints = savedInstanceState.getInt("winningPoints", 101)
         }
 
         setContent {
             DiceAssignmentTheme {
                 GameScreen(
-                    humanScore = humanScore,
-                    computerScore = computerScore,
-                    humanWins = humanWins,
-                    computerWins = computerWins,
-                    targetScore = targetScore,
-                    onHumanScoreChanged = { humanScore = it },
-                    onComputerScoreChanged = { computerScore = it },
-                    onHumanWinsChanged = { humanWins = it },
-                    onComputerWinsChanged = { computerWins = it },
-                    onTargetScoreChanged = { targetScore = it }
+                    myGamePoints = myGamePoints,
+                    compScore = compScore,
+                    playerWinCount = playerWinCount,
+                    compWinCount = compWinCount,
+                    winningPoints = winningPoints,
+                    onHumanScoreChanged = { myGamePoints = it },
+                    onComputerScoreChanged = { compScore = it },
+                    onHumanWinsChanged = { playerWinCount = it },
+                    onComputerWinsChanged = { compWinCount = it },
+                    onTargetScoreChanged = { winningPoints = it }
                 )
             }
         }
@@ -67,121 +80,136 @@ class GameActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putInt("humanScore", humanScore)
-        outState.putInt("computerScore", computerScore)
-        outState.putInt("humanWins", humanWins)
-        outState.putInt("computerWins", computerWins)
-        outState.putInt("targetScore", targetScore)
+        outState.putInt("myGamePoints", myGamePoints)
+        outState.putInt("compScore", compScore)
+        outState.putInt("playerWinCount", playerWinCount)
+        outState.putInt("compWinCount", compWinCount)
+        outState.putInt("winningPoints", winningPoints)
     }
 }
 
 @Composable
 fun GameScreen(
-    humanScore: Int,
-    computerScore: Int,
-    humanWins: Int,
-    computerWins: Int,
-    targetScore: Int,
+    myGamePoints: Int,
+    compScore: Int,
+    playerWinCount: Int,
+    compWinCount: Int,
+    winningPoints: Int,
     onHumanScoreChanged: (Int) -> Unit,
     onComputerScoreChanged: (Int) -> Unit,
     onHumanWinsChanged: (Int) -> Unit,
     onComputerWinsChanged: (Int) -> Unit,
     onTargetScoreChanged: (Int) -> Unit
 ) {
-    var humanDice by remember { mutableStateOf(List(5) { Random.nextInt(1, 7) }) }
-    var computerDice by remember { mutableStateOf(List(5) { Random.nextInt(1, 7) }) }
-    var humanDiceSelected by remember { mutableStateOf(List(5) { false }) }
-    var rollCount by remember { mutableStateOf(0) }
-    var gameFinished by remember { mutableStateOf(false) }
-    var tieBreaker by remember { mutableStateOf(false) }
-    var showWinDialog by remember { mutableStateOf(false) }
-    var showTargetDialog by remember { mutableStateOf(false) }
-    var winner by remember { mutableStateOf("") }
-    var humanTurnScore by remember { mutableStateOf(0) }
-    var computerTurnScore by remember { mutableStateOf(0) }
+    // dice and game state variables
+    var myDice by remember { mutableStateOf(List(5) { Random.nextInt(1, 7) }) }
+    var botDice by remember { mutableStateOf(List(5) { Random.nextInt(1, 7) }) }
+    var keptDice by remember { mutableStateOf(List(5) { false }) }
+    var throwNumber by remember { mutableStateOf(0) }
+    var gameOver by remember { mutableStateOf(false) }
+    var suddenDeath by remember { mutableStateOf(false) }
+    var suddedisplayWinPopup by remember { mutableStateOf(false) }
+    var suddchangeScorePopup by remember { mutableStateOf(false) }
+    var gameWinner by remember { mutableStateOf("") }
+    var currentPlayerRoll by remember { mutableStateOf(0) }
+    var currentCompRoll by remember { mutableStateOf(0) }
     val context = LocalContext.current
 
-    fun scoreRoll(humanRollScore: Int, computerRollScore: Int) {
-        if (tieBreaker) {
-            // In tie-breaker mode, the higher score wins
+    // this is where we calculate the scores
+    fun calculateScores(humanRollScore: Int, computerRollScore: Int) {
+        if (suddenDeath) {
+            // if we're in suddenDeath mode, just see who got higher roll
             if (humanRollScore > computerRollScore) {
-                winner = "Human"
-                onHumanWinsChanged(humanWins + 1)
+                gameWinner = "Human"
+                onHumanWinsChanged(playerWinCount + 1)
             } else if (computerRollScore > humanRollScore) {
-                winner = "Computer"
-                onComputerWinsChanged(computerWins + 1)
+                gameWinner = "Computer"
+                onComputerWinsChanged(compWinCount + 1)
             } else {
-                // Still tied, continue tie-breaker
-                rollCount = 0
-                humanDiceSelected = List(5) { false }
-                humanDice = List(5) { Random.nextInt(1, 7) }
-                computerDice = List(5) { Random.nextInt(1, 7) }
+                // still tied, so keep going
+                throwNumber = 0
+                keptDice = List(5) { false }
+                myDice = List(5) { Random.nextInt(1, 7) }
+                botDice = List(5) { Random.nextInt(1, 7) }
                 return
             }
-            showWinDialog = true
-            gameFinished = true
+            suddedisplayWinPopup = true
+            gameOver = true
             return
         }
 
-        // Update scores
-        val newHumanScore = humanScore + humanRollScore
-        val newComputerScore = computerScore + computerRollScore
+        // Update scores normally if not in suddenDeath
+        val newHumanScore = myGamePoints + humanRollScore
+        val newComputerScore = compScore + computerRollScore
 
         onHumanScoreChanged(newHumanScore)
         onComputerScoreChanged(newComputerScore)
 
-        // Check if a player has won
-        if (newHumanScore >= targetScore || newComputerScore >= targetScore) {
-            if (newHumanScore >= targetScore && newComputerScore >= targetScore) {
-                // Both reached target - check who has higher score
+        // check if game is over
+        if (newHumanScore >= winningPoints || newComputerScore >= winningPoints) {
+            if (newHumanScore >= winningPoints && newComputerScore >= winningPoints) {
+                // both players reached target
                 if (newHumanScore > newComputerScore) {
-                    winner = "Human"
-                    onHumanWinsChanged(humanWins + 1)
+                    gameWinner = "Human"
+                    onHumanWinsChanged(playerWinCount + 1)
                 } else if (newComputerScore > newHumanScore) {
-                    winner = "Computer"
-                    onComputerWinsChanged(computerWins + 1)
+                    gameWinner = "Computer"
+                    onComputerWinsChanged(compWinCount + 1)
                 } else {
-                    // Tie - need tiebreaker
-                    tieBreaker = true
-                    rollCount = 0
-                    humanDiceSelected = List(5) { false }
+                    // it's a tie. Go to suddenDeath
+                    suddenDeath = true
+                    throwNumber = 0
+                    keptDice = List(5) { false }
                     return
                 }
-            } else if (newHumanScore >= targetScore) {
-                winner = "Human"
-                onHumanWinsChanged(humanWins + 1)
+            } else if (newHumanScore >= winningPoints) {
+                gameWinner = "Human"
+                onHumanWinsChanged(playerWinCount + 1)
             } else {
-                winner = "Computer"
-                onComputerWinsChanged(computerWins + 1)
+                gameWinner = "Computer"
+                onComputerWinsChanged(compWinCount + 1)
             }
-            showWinDialog = true
-            gameFinished = true
+            suddedisplayWinPopup = true
+            gameOver = true
         }
 
         // Reset for next turn
-        rollCount = 0
-        humanDiceSelected = List(5) { false }
-        humanTurnScore = 0
-        computerTurnScore = 0
+        throwNumber = 0
+        keptDice = List(5) { false }
+        currentPlayerRoll = 0
+        currentCompRoll = 0
     }
 
-    // Function to get dice image resource
+    // get the right dice image
     fun getDiceImageResource(value: Int): Int {
         return when (value) {
-            1 -> R.drawable.dice_1
-            2 -> R.drawable.dice_2
-            3 -> R.drawable.dice_3
-            4 -> R.drawable.dice_4
-            5 -> R.drawable.dice_5
-            6 -> R.drawable.dice_6
-            else -> R.drawable.dice_1
+            1 -> R.drawable.human_dice_1
+            2 -> R.drawable.human_dice_2
+            3 -> R.drawable.human_dice_3
+            4 -> R.drawable.human_dice_4
+            5 -> R.drawable.human_dice_5
+            6 -> R.drawable.human_dice_6
+            else -> R.drawable.human_dice_1  // just in case but shouldn't happen
         }
     }
-    // Function to roll dice
-    fun rollDice() {
+
+    fun getCompDiceImageResource(value: Int): Int {
+        return when (value) {
+            1 -> R.drawable.comp_dice_2
+            2 -> R.drawable.comp_dice_3
+            3 -> R.drawable.comp_dice_5
+            4 -> R.drawable.comp_dice_4
+            5 -> R.drawable.comp_dice_2
+            6 -> R.drawable.comp_dice_6
+            else -> R.drawable.comp_dice_2  // just in case but shouldn't happen
+        }
+    }
+
+    // this is the main function for rolling dice
+    fun throwDice() {
         // Roll human dice (only the unselected ones in rerolls)
-        humanDice = humanDice.mapIndexed { index, value ->
-            if (rollCount == 0 || !humanDiceSelected[index]) {
+        myDice = myDice.mapIndexed { index, value ->
+            if (throwNumber == 0 || !keptDice[index]) {
                 Random.nextInt(1, 7)
             } else {
                 value
@@ -189,261 +217,292 @@ fun GameScreen(
         }
 
         // Calculate human turn score
-        humanTurnScore = humanDice.sum()
+        currentPlayerRoll = myDice.sum()
 
-        fun advancedComputerStrategy(
-            currentDice: List<Int>,
-            computerScore: Int,
-            humanScore: Int,
-            targetScore: Int,
-            rollCount: Int
+        // Simpler computer strategy - more like what a student would do
+        fun simpleComputerStrategy(
+            dice: List<Int>,
+            compScore: Int,
+            myGamePoints: Int
         ): Pair<Boolean, List<Boolean>> {
-            // If this is the last roll, we can't reroll
-            if (rollCount >= 3) {
+            // Check if this is the last roll - can't reroll if at max rolls
+            if (throwNumber >= 3) {
                 return Pair(false, List(5) { true })
             }
 
-            val currentSum = currentDice.sum()
-            val pointsToTarget = targetScore - computerScore
-            val scoreGap = computerScore - humanScore
+            // Calculate current dice sum
+            val diceSum = dice.sum()
 
-            // If we can win with current roll, take it
-            if (computerScore + currentSum >= targetScore) {
+            // If we get more than 20, probably good enough to keep
+            if (diceSum > 20) {
                 return Pair(false, List(5) { true })
             }
 
-            // If current roll is very good (above 22), keep it unless we're far behind
-            if (currentSum > 22 && (scoreGap > -15 || rollCount == 2)) {
-                return Pair(false, List(5) { true })
-            }
+            // If we're behind by more than 15 points, take more risks
+            val isBehind = compScore < myGamePoints - 15
 
-            // If we're in the final stretch and close to target
-            if (pointsToTarget < 30 && currentSum > pointsToTarget + 5) {
-                return Pair(false, List(5) { true })
-            }
+            // If we're close to target score, be more careful
+            val closeToTarget = winningPoints - compScore < 20
 
-            // Decide which dice to keep based on value
-            val diceToKeep = currentDice.map { value ->
+            // Keep high value dice (5 and 6), reroll low dice
+            val keepDice = dice.map { value ->
                 when {
-                    value >= 5 -> true // Always keep high value dice
-                    value >= 4 -> scoreGap > -10 // Keep 4s unless far behind
-                    value >= 3 -> scoreGap > 0 // Keep 3s only if ahead
-                    else -> false // Reroll low values
+                    value >= 5 -> true  // always keep high dice
+                    value <= 2 -> false  // always reroll low dice
+                    else -> !isBehind   // keep middle dice only if not behind
                 }
             }
 
             // If we're keeping all dice, just score
-            if (diceToKeep.all { it }) {
-                return Pair(false, diceToKeep)
+            if (keepDice.all { it }) {
+                return Pair(false, keepDice)
             }
 
-            // Take more risks in late game if behind
-            if (computerScore > 70 && humanScore > computerScore + 10) {
-                return Pair(true, currentDice.map { it >= 4 })
-            }
+            // Make reroll decision based on basic factors
+            val shouldReroll = diceSum < 18 || isBehind
 
-            // Be conservative in late game if ahead
-            if (computerScore > 70 && computerScore > humanScore + 10 && currentSum > 15) {
-                return Pair(false, List(5) { true })
-            }
-
-            return Pair(true, diceToKeep)
+            return Pair(shouldReroll, keepDice)
         }
 
-        // Roll computer dice and implement computer strategy
-        val computerStrategy = if (rollCount == 0) {
-            // First roll - always roll all dice
-            computerDice = List(5) { Random.nextInt(1, 7) }
-            computerTurnScore = computerDice.sum()
-            true // Always roll at least once
+        // Computer dice roll strategy
+        if (throwNumber == 0) {
+            // First roll - computer always rolls all dice
+            botDice = List(5) { Random.nextInt(1, 7) }
+            currentCompRoll = botDice.sum()
         } else {
-            // Use advanced strategy instead of random
-            val (shouldReroll, diceToKeep) = advancedComputerStrategy(
-                computerDice,
-                computerScore,
-                humanScore,
-                targetScore,
-                rollCount
+            // Use strategy for rerolls
+            val (shouldReroll, diceToKeep) = simpleComputerStrategy(
+                botDice,
+                compScore,
+                myGamePoints
             )
 
             if (shouldReroll) {
                 // Reroll dice according to strategy
-                computerDice = computerDice.mapIndexed { index, value ->
+                botDice = botDice.mapIndexed { index, value ->
                     if (diceToKeep[index]) {
                         value
                     } else {
                         Random.nextInt(1, 7)
                     }
                 }
-                computerTurnScore = computerDice.sum()
+                currentCompRoll = botDice.sum()
             }
-            shouldReroll
         }
 
-        rollCount++
+        throwNumber++
 
         // Auto-score after third roll
-        if (rollCount >= 3) {
-            scoreRoll(humanTurnScore, computerTurnScore)
+        if (throwNumber >= 3) {
+            calculateScores(currentPlayerRoll, currentCompRoll)
         }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFE6F2FF),
+                        Color(0xFFF5F5F5)
+                    )
+                )
+            )
             .verticalScroll(rememberScrollState())
-            .padding(1.dp)
     ) {
-
-
-        // Scores and game info
+        // Top scores section
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Wins counter
+            // Win counter
             Text(
-                text = "H:$humanWins/C:$computerWins",
+                text = "H:$playerWinCount/C:$compWinCount",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
 
-            // Target score
+            // Target score that player can click to change
             Text(
-                text = "Target: $targetScore",
+                text = "Target: $winningPoints",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 modifier = Modifier.clickable {
-                    if (!gameFinished) {
-                        showTargetDialog = true
+                    if (!gameOver) {
+                        suddchangeScorePopup = true
                     }
                 }
             )
 
-            // Scores
+            // Current scores
             Text(
-                text = "H:$humanScore/C:$computerScore",
+                text = "H:$myGamePoints/C:$compScore",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // Human dice
+        // Human dice section
         Text(
-            text = "Your Dice (Current Roll: ${humanDice.sum()})",
+            text = "Your Dice (Current Roll: ${myDice.sum()})",
             fontWeight = FontWeight.Bold,
             fontSize = 18.sp
         )
-
+        // Human dice section
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(8.dp),
-            modifier = Modifier.height(120.dp)
+            modifier = Modifier.height(90.dp)
         ) {
-            items(humanDice.indices.toList()) { index ->
+            items(myDice.indices.toList()) { index ->
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .padding(4.dp)
                         .border(
-                            width = if (humanDiceSelected[index]) 3.dp else 1.dp,
-                            color = if (humanDiceSelected[index]) Color.Green else Color.Gray
+                            width = if (keptDice[index]) 3.dp else 2.dp,
+                            color = if (keptDice[index]) DiceSelected else DiceUnselected,
+                            shape = RoundedCornerShape(12.dp)  // Rounded corners
                         )
-                        .clickable(enabled = rollCount > 0 && rollCount < 3 && !gameFinished) {
-                            // Toggle selection
-                            val newSelected = humanDiceSelected.toMutableList()
+                        .shadow(
+                            elevation = if (keptDice[index]) 8.dp else 4.dp,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .background(
+                            color = Color.White,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable(enabled = throwNumber > 0 && throwNumber < 3 && !gameOver) {
+                            // Toggle selection for rerolls
+                            val newSelected = keptDice.toMutableList()
                             newSelected[index] = !newSelected[index]
-                            humanDiceSelected = newSelected
+                            keptDice = newSelected
                         }
                 ) {
                     Image(
-                        painter = painterResource(id = getDiceImageResource(humanDice[index])),
-                        contentDescription = "Dice ${humanDice[index]}",
-                        modifier = Modifier.size(60.dp)
+                        painter = painterResource(id = getDiceImageResource(myDice[index])),
+                        contentDescription = "Dice ${myDice[index]}",
+                        modifier = Modifier
+                            .size(60.dp)
+                            .padding(4.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(1.dp))
 
-        // Computer dice
         Text(
-            text = "Computer Dice (Current Roll: ${computerDice.sum()})",
+            text = "Computer Dice (Current Roll: ${botDice.sum()})",
             fontWeight = FontWeight.Bold,
-            fontSize = 18.sp
+            fontSize = 18.sp,
         )
 
+        // Computer dice section
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
             contentPadding = PaddingValues(8.dp),
             modifier = Modifier.height(120.dp)
         ) {
-            items(computerDice.indices.toList()) { index ->
+            items(botDice.indices.toList()) { index ->
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .padding(4.dp)
-                        .border(width = 1.dp, color = Color.Gray)
+                        .border(
+                            width = 2.dp,
+                            color = ComputerDice,
+                            shape = RoundedCornerShape(12.dp)  // Rounded corners
+                        )
+                        .shadow(
+                            elevation = 4.dp,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .background(
+                            color = Color.White,
+                            shape = RoundedCornerShape(12.dp)
+                        )
                 ) {
                     Image(
-                        painter = painterResource(id = getDiceImageResource(computerDice[index])),
-                        contentDescription = "Dice ${computerDice[index]}",
-                        modifier = Modifier.size(60.dp)
+                        painter = painterResource(id = getCompDiceImageResource(botDice[index])),
+                        contentDescription = "Dice ${botDice[index]}",
+                        modifier = Modifier
+                            .size(60.dp)
+                            .padding(4.dp)
                     )
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(1.dp))
 
         // Control buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Button(
-                onClick = { rollDice() },
-                enabled = rollCount < 3 && !gameFinished
+            GameButton(
+                onClick = { throwDice() },
+                enabled = throwNumber < 3 && !gameOver,
+                color = DeepBlue
             ) {
-                Text(text = "Throw")
+                Text(
+                    text = "Throw",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
 
-            Button(
-                onClick = { scoreRoll(humanDice.sum(), computerDice.sum()) },
-                enabled = rollCount > 0 && rollCount < 3 && !gameFinished
+            GameButton(
+                onClick = { calculateScores(myDice.sum(), botDice.sum()) },
+                enabled = throwNumber > 0 && throwNumber < 3 && !gameOver,
+                color = Green
             ) {
-                Text(text = "Score")
+                Text(
+                    text = "Score",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+
+            GameButton(
+                onClick = {
+                    val mainActivity = Intent(context, MainActivity::class.java)
+                    context.startActivity(mainActivity)
+                },
+                color = Amber
+            ) {
+                Text(
+                    text = "Back",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(1.dp))
 
-        // Roll count
+        // Roll count display
         Text(
-            text = "Roll: $rollCount/3",
+            text = "Roll: $throwNumber/3",
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
             fontSize = 16.sp
         )
 
         // Win dialog
-        if (showWinDialog) {
+        if (suddedisplayWinPopup) {
             AlertDialog(
                 onDismissRequest = { },
                 title = {
                     Text(
-                        text = if (winner == "Human") "You Win!" else "You Lose",
-                        color = if (winner == "Human") Color.Green else Color.Red,
+                        text = if (gameWinner == "Human") "You Win!" else "You Lose",
+                        color = if (gameWinner == "Human") Color.Green else Color.Red,
                         fontWeight = FontWeight.Bold
                     )
                 },
                 text = {
                     Text(
                         text =  "Final Score:\n"+
-                                "Human $humanScore - Computer $computerScore\n\n" +
+                                "Human $myGamePoints - Computer $compScore\n\n" +
                                 "Press OK to continue\n" +
                                 "Press CANCEL to leave"
                     )
@@ -460,8 +519,8 @@ fun GameScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            showWinDialog = false
-                            gameFinished = false
+                            suddedisplayWinPopup = false
+                            gameOver = false
                             onHumanScoreChanged(0)
                             onComputerScoreChanged(0)
                         }) {
@@ -471,12 +530,12 @@ fun GameScreen(
             )
         }
 
-        // Target score dialog
-        if (showTargetDialog) {
-            val newTargetScore = remember { mutableStateOf(targetScore.toString()) }
+        // Dialog for changing target score
+        if (suddchangeScorePopup) {
+            val newTargetScore = remember { mutableStateOf(winningPoints.toString()) }
 
             AlertDialog(
-                onDismissRequest = { showTargetDialog = false },
+                onDismissRequest = { suddchangeScorePopup = false },
                 title = { Text("Set Target Score") },
                 text = {
                     Column {
@@ -498,24 +557,24 @@ fun GameScreen(
                             if (parsedScore != null && parsedScore > 0) {
                                 onTargetScoreChanged(parsedScore)
                             }
-                            showTargetDialog = false
+                            suddchangeScorePopup = false
                         }
                     ) {
                         Text("Set")
                     }
                 },
                 dismissButton = {
-                    Button(onClick = { showTargetDialog = false }) {
+                    Button(onClick = { suddchangeScorePopup = false }) {
                         Text("Cancel")
                     }
                 }
             )
         }
 
-        // Game state text (for debugging)
-        if (tieBreaker) {
+        // SuddenDeath notice
+        if (suddenDeath) {
             Text(
-                text = "Tie-breaker mode! Roll once to determine the winner.",
+                text = "Tie-breaker mode! Roll once to determine the gameWinner.",
                 color = Color.Blue,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
@@ -525,11 +584,11 @@ fun GameScreen(
             )
         }
 
-        // Initial roll when the screen is first composed
+        // Initialize dice on first launch
         LaunchedEffect(Unit) {
-            if (humanDice.isEmpty()) {
-                humanDice = List(5) { Random.nextInt(1, 7) }
-                computerDice = List(5) { Random.nextInt(1, 7) }
+            if (myDice.isEmpty()) {
+                myDice = List(5) { Random.nextInt(1, 7) }
+                botDice = List(5) { Random.nextInt(1, 7) }
             }
         }
     }
